@@ -1,4 +1,7 @@
-use frost_dalek::{compute_message_hash, generate_commitment_share_lists, DistributedKeyGeneration, Parameters, Participant, SignatureAggregator};
+use frost_dalek::{
+    compute_message_hash, generate_commitment_share_lists, DistributedKeyGeneration, Parameters,
+    Participant, SignatureAggregator,
+};
 use rand_core::OsRng;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
@@ -29,11 +32,20 @@ fn main() {
     // (pretend we are on bob's machine and he has received alice's zkp)
     {
         let bobs_alice_copy = &participants[ALICE_INDEX as usize];
-        assert!(bobs_alice_copy.proof_of_secret_key.verify(&ALICE_INDEX, bobs_alice_copy.public_key().unwrap()).is_ok());
+        assert!(bobs_alice_copy
+            .proof_of_secret_key
+            .verify(&ALICE_INDEX, bobs_alice_copy.public_key().unwrap())
+            .is_ok());
     }
 
     // These are private and should not be shared.
-    let participants_private = [alice_coeffs_private, bob_coeffs_private, carol_coeffs_private, dave_coeffs_private, eric_coeffs_private];
+    let participants_private = [
+        alice_coeffs_private,
+        bob_coeffs_private,
+        carol_coeffs_private,
+        dave_coeffs_private,
+        eric_coeffs_private,
+    ];
 
     // Now all participants start distributed key generation
     // This is to be done on different devices in private,
@@ -41,7 +53,13 @@ fn main() {
     let shares: [DistributedKeyGeneration<_>; 5] = std::array::from_fn(|i| {
         let mut other_participants = participants.to_vec();
         other_participants.remove(i);
-        DistributedKeyGeneration::<_>::new(&params, &(i as u32), &participants_private[i], &mut other_participants).unwrap()
+        DistributedKeyGeneration::<_>::new(
+            &params,
+            &(i as u32),
+            &participants_private[i],
+            &mut other_participants,
+        )
+        .unwrap()
     });
 
     // Now we distribute these shares and each peer builds their group keypair
@@ -65,9 +83,14 @@ fn main() {
         let round_two = shares[slf].clone().to_round_two(other_shares).unwrap();
 
         // Finalize
-        let (group_key, secret_key) = round_two.finish(participants[slf].public_key().unwrap()).unwrap();
+        let (group_key, secret_key) = round_two
+            .finish(participants[slf].public_key().unwrap())
+            .unwrap();
 
-        DistributedKeypair { group_key, secret_key }
+        DistributedKeypair {
+            group_key,
+            secret_key,
+        }
     });
 
     // Try group signing 3/5
@@ -81,7 +104,8 @@ fn main() {
     let mut aggregator = SignatureAggregator::new(params, group_key, &context[..], &message[..]);
     let signer_indices = [ALICE_INDEX, BOB_INDEX, CAROL_INDEX];
     // 4: Get commitment share list
-    let commitment_share_list = signer_indices.map(|s| generate_commitment_share_lists(&mut OsRng, s, 1));
+    let commitment_share_list =
+        signer_indices.map(|s| generate_commitment_share_lists(&mut OsRng, s, 1));
     let mut pub_share_list = Vec::with_capacity(signer_indices.len());
     let mut sec_share_list = Vec::with_capacity(signer_indices.len());
     for (public, secret) in commitment_share_list {
@@ -124,7 +148,9 @@ fn main() {
     let threshold_signature = aggregator.aggregate().unwrap();
 
     // Verify
-    assert!(threshold_signature.verify(&group_key, &message_hash).is_ok());
+    assert!(threshold_signature
+        .verify(&group_key, &message_hash)
+        .is_ok());
 
     //
     //
@@ -136,7 +162,10 @@ fn main() {
     let pubkey = Pubkey::new_from_array(group_key.to_bytes());
     println!("gk = {:?}", group_key.to_bytes().eq(pubkey.as_ref()));
     let signature = Signature::new(&threshold_signature.to_bytes());
-    println!("tsig = {:?}", threshold_signature.to_bytes().eq(signature.as_ref()));
+    println!(
+        "tsig = {:?}",
+        threshold_signature.to_bytes().eq(signature.as_ref())
+    );
 
     // Check message
     assert!(signature.verify(pubkey.as_ref(), message_hash.as_ref()));

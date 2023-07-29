@@ -48,8 +48,7 @@ impl NizkOfSecretKey {
         secret_key: &Scalar,
         public_key: &EdwardsPoint,
         mut csprng: impl Rng + CryptoRng,
-    ) -> Self
-    {
+    ) -> Self {
         let k: Scalar = Scalar::random(&mut csprng);
         let M: EdwardsPoint = &k * &ED25519_BASEPOINT_TABLE;
 
