@@ -15,8 +15,8 @@ use std::vec::Vec;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
-use curve25519_dalek::ristretto::RistrettoPoint;
+use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
+use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::Identity;
 
@@ -40,8 +40,8 @@ impl NoncePair {
 
 impl From<NoncePair> for CommitmentShare {
     fn from(other: NoncePair) -> CommitmentShare {
-        let x = &RISTRETTO_BASEPOINT_TABLE * &other.0;
-        let y = &RISTRETTO_BASEPOINT_TABLE * &other.1;
+        let x = &ED25519_BASEPOINT_TABLE * &other.0;
+        let y = &ED25519_BASEPOINT_TABLE * &other.1;
 
         CommitmentShare {
             hiding: Commitment {
@@ -62,13 +62,13 @@ pub(crate) struct Commitment {
     /// The nonce.
     pub(crate) nonce: Scalar,
     /// The commitment.
-    pub(crate) sealed: RistrettoPoint,
+    pub(crate) sealed: EdwardsPoint,
 }
 
 impl Zeroize for Commitment {
     fn zeroize(&mut self) {
         self.nonce.zeroize();
-        self.sealed = RistrettoPoint::identity();
+        self.sealed = EdwardsPoint::identity();
     }
 }
 
@@ -109,7 +109,7 @@ impl ConstantTimeEq for CommitmentShare {
 
 impl CommitmentShare {
     /// Publish the public commitments in this [`CommitmentShare`].
-    pub fn publish(&self) -> (RistrettoPoint, RistrettoPoint) {
+    pub fn publish(&self) -> (EdwardsPoint, EdwardsPoint) {
         (self.hiding.sealed, self.binding.sealed)
     }
 }
@@ -132,7 +132,7 @@ pub struct PublicCommitmentShareList {
     /// The participant's index.
     pub participant_index: u32,
     /// The published commitments.
-    pub commitments: Vec<(RistrettoPoint, RistrettoPoint)>,
+    pub commitments: Vec<(EdwardsPoint, EdwardsPoint)>,
 }
 
 /// Pre-compute a list of [`CommitmentShare`]s for single-round threshold signing.
@@ -158,7 +158,7 @@ pub fn generate_commitment_share_lists(
         commitments.push(CommitmentShare::from(NoncePair::new(&mut csprng)));
     }
 
-    let mut published: Vec<(RistrettoPoint, RistrettoPoint)> = Vec::with_capacity(number_of_shares);
+    let mut published: Vec<(EdwardsPoint, EdwardsPoint)> = Vec::with_capacity(number_of_shares);
 
     for commitment in commitments.iter() {
         published.push(commitment.publish());
@@ -215,7 +215,7 @@ mod test {
         let (public_share_list, secret_share_list) = generate_commitment_share_lists(&mut OsRng, 0, 5);
 
         assert_eq!(public_share_list.commitments[0].0.compress(),
-                   (&secret_share_list.commitments[0].hiding.nonce * &RISTRETTO_BASEPOINT_TABLE).compress());
+                   (&secret_share_list.commitments[0].hiding.nonce * &ED25519_BASEPOINT_TABLE).compress());
     }
 
     #[test]

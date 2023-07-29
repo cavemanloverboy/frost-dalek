@@ -178,9 +178,9 @@ use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
-use curve25519_dalek::ristretto::CompressedRistretto;
-use curve25519_dalek::ristretto::RistrettoPoint;
+use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
+use curve25519_dalek::edwards::CompressedEdwardsY;
+use curve25519_dalek::edwards::EdwardsPoint;
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::Identity;
 
@@ -200,7 +200,7 @@ pub struct Coefficients(pub(crate) Vec<Scalar>);
 /// A commitment to the dealer's secret polynomial coefficients for Feldman's
 /// verifiable secret sharing scheme.
 #[derive(Clone, Debug)]
-pub struct VerifiableSecretSharingCommitment(pub(crate) Vec<RistrettoPoint>);
+pub struct VerifiableSecretSharingCommitment(pub(crate) Vec<EdwardsPoint>);
 
 /// A participant created by a trusted dealer.
 ///
@@ -212,7 +212,7 @@ pub struct VerifiableSecretSharingCommitment(pub(crate) Vec<RistrettoPoint>);
 pub struct DealtParticipant {
     pub(crate) secret_share: SecretShare,
     pub(crate) public_key: IndividualPublicKey,
-    pub(crate) group_key: RistrettoPoint,
+    pub(crate) group_key: EdwardsPoint,
 }
 
 /// A participant in a threshold signing.
@@ -222,7 +222,7 @@ pub struct Participant {
     pub index: u32,
     /// A vector of Pedersen commitments to the coefficients of this
     /// participant's private polynomial.
-    pub commitments: Vec<RistrettoPoint>,
+    pub commitments: Vec<EdwardsPoint>,
     /// The zero-knowledge proof of knowledge of the secret key (a.k.a. the
     /// first coefficient in the private polynomial).  It is constructed as a
     /// Schnorr signature using \\( a_{i0} \\) as the signing key.
@@ -273,7 +273,7 @@ impl Participant {
         let t: usize = parameters.t as usize;
         let mut rng: OsRng = OsRng;
         let mut coefficients: Vec<Scalar> = Vec::with_capacity(t);
-        let mut commitments: Vec<RistrettoPoint> = Vec::with_capacity(t);
+        let mut commitments: Vec<EdwardsPoint> = Vec::with_capacity(t);
 
         for _ in 0..t {
             coefficients.push(Scalar::random(&mut rng));
@@ -285,7 +285,7 @@ impl Participant {
         //         C_i = [\phi_{i0}, ..., \phi_{i(t-1)}], where \phi_{ij} = g^{a_{ij}},
         //         0 ≤ j ≤ t-1.
         for j in 0..t {
-            commitments.push(&coefficients.0[j] * &RISTRETTO_BASEPOINT_TABLE);
+            commitments.push(&coefficients.0[j] * &ED25519_BASEPOINT_TABLE);
         }
 
         // Yes, I know the steps are out of order.  It saves one scalar multiplication.
@@ -300,10 +300,10 @@ impl Participant {
         (Participant { index, commitments, proof_of_secret_key: proof }, coefficients)
     }
 
-    /// Retrieve \\( \alpha_{i0} * B \\), where \\( B \\) is the Ristretto basepoint.
+    /// Retrieve \\( \alpha_{i0} * B \\), where \\( B \\) is the Edwards basepoint.
     ///
     /// This is used to pass into the final call to `DistributedKeyGeneration::<RoundTwo>.finish()`.
-    pub fn public_key(&self) -> Option<&RistrettoPoint> {
+    pub fn public_key(&self) -> Option<&EdwardsPoint> {
         if !self.commitments.is_empty() {
             return Some(&self.commitments[0]);
         }
@@ -333,18 +333,18 @@ fn generate_shares(parameters: &Parameters, secret: Scalar, mut rng: OsRng) -> (
     //         C_i = [\phi_{i0}, ..., \phi_{i(t-1)}], where \phi_{ij} = g^{a_{ij}},
     //         0 ≤ j ≤ t-1.
     for j in 0..t {
-        commitment.0.push(&coefficients.0[j] * &RISTRETTO_BASEPOINT_TABLE);
+        commitment.0.push(&coefficients.0[j] * &ED25519_BASEPOINT_TABLE);
     }
 
     // Generate secret shares here
-    let group_key = &RISTRETTO_BASEPOINT_TABLE * &coefficients.0[0];
+    let group_key = &ED25519_BASEPOINT_TABLE * &coefficients.0[0];
 
     // Only one polynomial because dealer, then secret shards are dependent upon index.
     for i in 1..parameters.n + 1 {
         let secret_share = SecretShare::evaluate_polynomial(&i, &coefficients);
         let public_key = IndividualPublicKey {
             index: i,
-            share: &RISTRETTO_BASEPOINT_TABLE * &secret_share.polynomial_evaluation,
+            share: &ED25519_BASEPOINT_TABLE * &secret_share.polynomial_evaluation,
         };
 
         participants.push(DealtParticipant { secret_share, public_key, group_key });
@@ -600,9 +600,9 @@ impl SecretShare {
     /// Verify that this secret share was correctly computed w.r.t. some secret
     /// polynomial coefficients attested to by some `commitment`.
     pub(crate) fn verify(&self, commitment: &VerifiableSecretSharingCommitment) -> Result<(), ()> {
-        let lhs = &RISTRETTO_BASEPOINT_TABLE * &self.polynomial_evaluation;
+        let lhs = &ED25519_BASEPOINT_TABLE * &self.polynomial_evaluation;
         let term: Scalar = self.index.into();
-        let mut rhs: RistrettoPoint = RistrettoPoint::identity();
+        let mut rhs: EdwardsPoint = EdwardsPoint::identity();
 
         for (index, com) in commitment.0.iter().rev().enumerate() {
             rhs += com;
@@ -633,7 +633,7 @@ impl DistributedKeyGeneration<RoundTwo> {
     /// ```ignore
     /// let (group_key, secret_key) = state.finish(participant.public_key()?)?;
     /// ```
-    pub fn finish(mut self, my_commitment: &RistrettoPoint) -> Result<(GroupKey, SecretKey), ()> {
+    pub fn finish(mut self, my_commitment: &EdwardsPoint) -> Result<(GroupKey, SecretKey), ()> {
         let secret_key = self.calculate_signing_key()?;
         let group_key = self.calculate_group_key(my_commitment)?;
 
@@ -660,8 +660,8 @@ impl DistributedKeyGeneration<RoundTwo> {
     /// # Returns
     ///
     /// A [`GroupKey`] for the set of participants.
-    pub(crate) fn calculate_group_key(&self, my_commitment: &RistrettoPoint) -> Result<GroupKey, ()> {
-        let mut keys: Vec<RistrettoPoint> = Vec::with_capacity(self.state.parameters.n as usize);
+    pub(crate) fn calculate_group_key(&self, my_commitment: &EdwardsPoint) -> Result<GroupKey, ()> {
+        let mut keys: Vec<EdwardsPoint> = Vec::with_capacity(self.state.parameters.n as usize);
 
         for commitment in self.state.their_commitments.iter() {
             match commitment.1.0.get(0) {
@@ -684,7 +684,7 @@ pub struct IndividualPublicKey {
     /// The participant index to which this key belongs.
     pub index: u32,
     /// The public verification share.
-    pub share: RistrettoPoint,
+    pub share: EdwardsPoint,
 }
 
 impl IndividualPublicKey {
@@ -712,10 +712,10 @@ impl IndividualPublicKey {
     pub fn verify(
         &self,
         parameters: &Parameters,
-        commitments: &[RistrettoPoint],
+        commitments: &[EdwardsPoint],
     ) -> Result<(), ()>
     {
-        let rhs = RistrettoPoint::identity();
+        let rhs = EdwardsPoint::identity();
 
         for j in 1..parameters.n {
             for k in 0..parameters.t {
@@ -739,7 +739,7 @@ pub struct SecretKey {
 impl SecretKey {
     /// Derive the corresponding public key for this secret key.
     pub fn to_public(&self) -> IndividualPublicKey {
-        let share = &RISTRETTO_BASEPOINT_TABLE * &self.key;
+        let share = &ED25519_BASEPOINT_TABLE * &self.key;
 
         IndividualPublicKey {
             index: self.index,
@@ -756,7 +756,7 @@ impl From<&SecretKey> for IndividualPublicKey {
 
 /// A public key, used to verify a signature made by a threshold of a group of participants.
 #[derive(Clone, Copy, Debug, Eq)]
-pub struct GroupKey(pub(crate) RistrettoPoint);
+pub struct GroupKey(pub(crate) EdwardsPoint);
 
 impl PartialEq for GroupKey {
     fn eq(&self, other: &Self) -> bool {
@@ -772,7 +772,7 @@ impl GroupKey {
 
     /// Deserialise this group public key from an array of bytes.
     pub fn from_bytes(bytes: [u8; 32]) -> Result<GroupKey, ()> {
-        let point = CompressedRistretto(bytes).decompress().ok_or(())?;
+        let point = CompressedEdwardsY(bytes).decompress().ok_or(())?;
 
         Ok(GroupKey(point))
     }
@@ -921,7 +921,7 @@ mod test {
         let mut commitments = VerifiableSecretSharingCommitment(Vec::new());
 
         for i in 0..5 {
-            commitments.0.push(&RISTRETTO_BASEPOINT_TABLE * &coefficients.0[i]);
+            commitments.0.push(&ED25519_BASEPOINT_TABLE * &coefficients.0[i]);
         }
 
         assert!(share.verify(&commitments).is_ok());
@@ -943,7 +943,7 @@ mod test {
         let mut commitments = VerifiableSecretSharingCommitment(Vec::new());
 
         for i in 0..5 {
-            commitments.0.push(&RISTRETTO_BASEPOINT_TABLE * &coefficients.0[i]);
+            commitments.0.push(&ED25519_BASEPOINT_TABLE * &coefficients.0[i]);
         }
 
         assert!(share.verify(&commitments).is_ok());
@@ -970,7 +970,7 @@ mod test {
 
         let (p1_group_key, p1_secret_key) = result.unwrap();
 
-        assert!(p1_group_key.0.compress() == (&p1_secret_key.key * &RISTRETTO_BASEPOINT_TABLE).compress());
+        assert!(p1_group_key.0.compress() == (&p1_secret_key.key * &ED25519_BASEPOINT_TABLE).compress());
     }
 
     #[test]
